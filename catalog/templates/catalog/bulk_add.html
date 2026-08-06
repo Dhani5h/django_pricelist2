@@ -1,0 +1,31 @@
+{% extends "catalog/base.html" %}
+{% block title %}Bulk add items{% endblock %}
+{% block content %}
+<header>
+  <h1>Bulk add items</h1>
+</header>
+
+<nav style="margin-bottom:14px;">
+  <a href="{% url 'search' %}">Back to price book</a>
+</nav>
+
+{% if messages %}
+  <ul class="messages">
+    {% for message in messages %}<li>{{ message }}</li>{% endfor %}
+  </ul>
+{% endif %}
+
+<p style="font-size:13px;color:var(--muted);">
+  One item per line: <code>code, name, category, wholesale price, retail price</code>.
+  Existing codes will be updated, new codes will be created.
+</p>
+
+<form method="post">
+  {% csrf_token %}
+  <textarea name="bulk_text" rows="10" style="width:100%;font-family:monospace;"
+    placeholder="A-102, 16oz claw hammer, Hand tools, 8.50, 14.99&#10;B-014, Galvanized bucket 5gal, Storage, 3.20, 6.99"></textarea>
+  <div style="margin-top:10px;">
+    <button class="btn" type="submit">Add lines</button>
+  </div>
+</form>
+{% endblock %}

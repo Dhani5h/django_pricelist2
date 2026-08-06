@@ -1,0 +1,193 @@
+{% extends "catalog/base.html" %}
+{% block title %}Price book{% endblock %}
+{% block content %}
+<header>
+  <h1>Price book</h1>
+  <span class="count">{{ total_count }} item{{ total_count|pluralize }}</span>
+</header>
+
+<nav style="margin-bottom:14px;">
+  <a href="/admin/">Edit items (staff)</a>
+  <a href="{% url 'bulk_add' %}">Bulk add (staff)</a>
+</nav>
+
+<form class="toolbar" method="get" id="searchForm" autocomplete="off">
+  <div style="position:relative;flex:1;min-width:160px;">
+    <input id="q" type="text" name="q" placeholder="Search by code or name" value="{{ query }}" autocomplete="off">
+    <div id="suggestions"></div>
+  </div>
+  <select name="category" onchange="this.form.submit()">
+    <option value="">All categories</option>
+    {% for c in categories %}
+      <option value="{{ c.id }}" {% if selected_category == c.id|stringformat:"s" %}selected{% endif %}>{{ c.name }}</option>
+    {% endfor %}
+  </select>
+  <button class="btn" type="submit">Search</button>
+  <button class="btn ghost" type="button" id="scanBtn">📷 Scan</button>
+</form>
+
+<div class="modal-overlay" id="scanModal">
+  <div class="modal-box">
+    <h3>Scan a barcode</h3>
+    <div id="reader"></div>
+    <div class="modal-actions">
+      <span class="scan-status" id="scanStatus">Point the camera at a barcode</span>
+      <button class="btn ghost" type="button" id="closeScan">Cancel</button>
+    </div>
+  </div>
+</div>
+
+{% regroup items by category as category_list %}
+{% if items %}
+  {% for group in category_list %}
+    <div class="cat-title">{{ group.grouper|default:"Uncategorized" }}</div>
+    {% for item in group.list %}
+      <div class="row">
+        <span class="code">{{ item.code }}</span>
+        <span class="name">{{ item.name }}</span>
+        <span class="price wholesale">W ${{ item.wholesale_price }}</span>
+        <span class="price retail">R ${{ item.retail_price }}</span>
+      </div>
+    {% endfor %}
+  {% endfor %}
+{% else %}
+  <div class="empty">No items match your search.</div>
+{% endif %}
+
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+(function(){
+  const input = document.getElementById('q');
+  const box = document.getElementById('suggestions');
+  const form = document.getElementById('searchForm');
+  let debounceTimer = null;
+  let activeIndex = -1;
+  let currentResults = [];
+
+  function closeBox(){
+    box.classList.remove('open');
+    box.innerHTML = '';
+    activeIndex = -1;
+  }
+
+  function renderResults(results){
+    currentResults = results;
+    activeIndex = -1;
+    if(results.length === 0){
+      closeBox();
+      return;
+    }
+    box.innerHTML = results.map((r, i) => `
+      <div class="suggestion" data-index="${i}" data-code="${r.code}">
+        <span class="s-code">${r.code}</span>
+        <span class="s-name">${r.name}</span>
+        <span class="s-price">$${r.retail}</span>
+      </div>
+    `).join('');
+    box.classList.add('open');
+    box.querySelectorAll('.suggestion').forEach(el => {
+      el.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        selectResult(el.dataset.code);
+      });
+    });
+  }
+
+  function selectResult(code){
+    input.value = code;
+    closeBox();
+    form.submit();
+  }
+
+  function setActive(index){
+    const items = box.querySelectorAll('.suggestion');
+    items.forEach(el => el.classList.remove('active'));
+    if(index >= 0 && index < items.length){
+      items[index].classList.add('active');
+      items[index].scrollIntoView({block:'nearest'});
+    }
+    activeIndex = index;
+  }
+
+  input.addEventListener('input', () => {
+    const q = input.value.trim();
+    clearTimeout(debounceTimer);
+    if(q.length < 1){
+      closeBox();
+      return;
+    }
+    debounceTimer = setTimeout(() => {
+      fetch(`{% url 'suggest' %}?q=${encodeURIComponent(q)}`)
+        .then(res => res.json())
+        .then(data => renderResults(data.results || []))
+        .catch(() => closeBox());
+    }, 200);
+  });
+
+  input.addEventListener('keydown', (e) => {
+    const items = box.querySelectorAll('.suggestion');
+    if(!box.classList.contains('open') || items.length === 0) return;
+
+    if(e.key === 'ArrowDown'){
+      e.preventDefault();
+      setActive(Math.min(activeIndex + 1, items.length - 1));
+    } else if(e.key === 'ArrowUp'){
+      e.preventDefault();
+      setActive(Math.max(activeIndex - 1, 0));
+    } else if(e.key === 'Enter'){
+      if(activeIndex >= 0){
+        e.preventDefault();
+        selectResult(currentResults[activeIndex].code);
+      }
+    } else if(e.key === 'Escape'){
+      closeBox();
+    }
+  });
+
+  document.addEventListener('click', (e) => {
+    if(!box.contains(e.target) && e.target !== input){
+      closeBox();
+    }
+  });
+
+  // --- Barcode scanning ---------------------------------------------
+  const scanBtn = document.getElementById('scanBtn');
+  const scanModal = document.getElementById('scanModal');
+  const closeScanBtn = document.getElementById('closeScan');
+  const scanStatus = document.getElementById('scanStatus');
+  let html5QrCode = null;
+
+  function stopScanner(){
+    if(html5QrCode){
+      html5QrCode.stop().then(() => html5QrCode.clear()).catch(() => {});
+    }
+    scanModal.classList.remove('open');
+  }
+
+  scanBtn.addEventListener('click', () => {
+    if(typeof Html5Qrcode === 'undefined'){
+      scanStatus.textContent = 'Scanner failed to load. Check your internet connection.';
+      scanModal.classList.add('open');
+      return;
+    }
+    scanModal.classList.add('open');
+    scanStatus.textContent = 'Point the camera at a barcode';
+    html5QrCode = new Html5Qrcode('reader');
+    html5QrCode.start(
+      { facingMode: 'environment' },
+      { fps: 10, qrbox: { width: 250, height: 120 } },
+      (decodedText) => {
+        stopScanner();
+        input.value = decodedText;
+        form.submit();
+      },
+      () => { /* ignore per-frame scan misses */ }
+    ).catch((err) => {
+      scanStatus.textContent = 'Could not access camera — check permissions.';
+    });
+  });
+
+  closeScanBtn.addEventListener('click', stopScanner);
+})();
+</script>
+{% endblock %}
