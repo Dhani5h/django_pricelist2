@@ -13,7 +13,11 @@ class Category(models.Model):
 
 
 class Item(models.Model):
-    code = models.CharField(max_length=50, unique=True, db_index=True)
+    code = models.CharField(max_length=50, unique=True, db_index=True)  # item no, shown to staff and customers
+    barcode = models.CharField(
+        max_length=64, unique=True, blank=True, null=True, db_index=True,
+        help_text='The number/code printed in the barcode on the product.'
+    )
     name = models.CharField(max_length=200, db_index=True)
     category = models.ForeignKey(
         Category, on_delete=models.SET_NULL, null=True, blank=True, related_name='items'

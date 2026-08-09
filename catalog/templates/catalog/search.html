@@ -29,12 +29,21 @@
 <div class="modal-overlay" id="scanModal">
   <div class="modal-box">
     <h3>Scan a barcode</h3>
-    <div id="reader"></div>
+    <div id="reader">
+      <video id="scanVideo" style="width:100%;border-radius:8px;background:#000;" playsinline muted></video>
+      <div class="scan-guide"></div>
+    </div>
     <div class="modal-actions">
       <span class="scan-status" id="scanStatus">Point the camera at a barcode</span>
       <button class="btn ghost" type="button" id="closeScan">Cancel</button>
     </div>
   </div>
+</div>
+
+<div class="customer-display" id="customerDisplay">
+  <button class="cd-close" type="button" id="closeCustomerDisplay" aria-label="Close">✕</button>
+  <div class="cd-content" id="cdContent"></div>
+  <button class="btn cd-scan-again" type="button" id="scanAgainBtn">📷 Scan another item</button>
 </div>
 
 {% regroup items by category as category_list %}
@@ -45,8 +54,12 @@
       <div class="row">
         <span class="code">{{ item.code }}</span>
         <span class="name">{{ item.name }}</span>
-        <span class="price wholesale">W ${{ item.wholesale_price }}</span>
-        <span class="price retail">R ${{ item.retail_price }}</span>
+        <span class="price wholesale">W SAR {{ item.wholesale_price }}</span>
+        <span class="price retail">R SAR {{ item.retail_price }}</span>
+        <button class="icon-btn show-btn" type="button"
+          data-item-no="{{ item.code }}"
+          data-name="{{ item.name }}"
+          data-price="{{ item.retail_price }}">Show</button>
       </div>
     {% endfor %}
   {% endfor %}
@@ -54,7 +67,7 @@
   <div class="empty">No items match your search.</div>
 {% endif %}
 
-<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
 <script>
 (function(){
   const input = document.getElementById('q');
@@ -81,7 +94,7 @@
       <div class="suggestion" data-index="${i}" data-code="${r.code}">
         <span class="s-code">${r.code}</span>
         <span class="s-name">${r.name}</span>
-        <span class="s-price">$${r.retail}</span>
+        <span class="s-price">SAR ${r.retail}</span>
       </div>
     `).join('');
     box.classList.add('open');
@@ -155,39 +168,121 @@
   const scanModal = document.getElementById('scanModal');
   const closeScanBtn = document.getElementById('closeScan');
   const scanStatus = document.getElementById('scanStatus');
-  let html5QrCode = null;
+  let codeReader = null;
+  let scanning = false;
+
+  function getCodeReader(){
+    if(codeReader) return codeReader;
+    const hints = new Map();
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+      ZXing.BarcodeFormat.EAN_13,
+      ZXing.BarcodeFormat.EAN_8,
+      ZXing.BarcodeFormat.UPC_A,
+      ZXing.BarcodeFormat.UPC_E,
+      ZXing.BarcodeFormat.CODE_128,
+      ZXing.BarcodeFormat.CODE_39,
+      ZXing.BarcodeFormat.QR_CODE,
+    ]);
+    hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+    codeReader = new ZXing.BrowserMultiFormatReader(hints);
+    return codeReader;
+  }
 
   function stopScanner(){
-    if(html5QrCode){
-      html5QrCode.stop().then(() => html5QrCode.clear()).catch(() => {});
+    if(codeReader && scanning){
+      codeReader.reset();
     }
+    scanning = false;
     scanModal.classList.remove('open');
   }
 
   scanBtn.addEventListener('click', () => {
-    if(typeof Html5Qrcode === 'undefined'){
+    if(typeof ZXing === 'undefined'){
       scanStatus.textContent = 'Scanner failed to load. Check your internet connection.';
       scanModal.classList.add('open');
       return;
     }
     scanModal.classList.add('open');
     scanStatus.textContent = 'Point the camera at a barcode';
-    html5QrCode = new Html5Qrcode('reader');
-    html5QrCode.start(
-      { facingMode: 'environment' },
-      { fps: 10, qrbox: { width: 250, height: 120 } },
-      (decodedText) => {
-        stopScanner();
-        input.value = decodedText;
-        form.submit();
-      },
-      () => { /* ignore per-frame scan misses */ }
+    const reader = getCodeReader();
+    scanning = true;
+    reader.decodeFromConstraints(
+      { video: { facingMode: { ideal: 'environment' } } },
+      'scanVideo',
+      (result, err) => {
+        if(result){
+          stopScanner();
+          showCustomerDisplay(result.getText());
+        }
+        // err fires continuously on frames with no barcode found — ignore those
+      }
     ).catch((err) => {
-      scanStatus.textContent = 'Could not access camera — check permissions.';
+      console.error('Camera start failed:', err);
+      scanStatus.textContent = 'Could not start camera: ' + (err && err.name ? err.name : err);
     });
   });
 
   closeScanBtn.addEventListener('click', stopScanner);
+
+  // --- Customer-facing price display ---------------------------------
+  const customerDisplay = document.getElementById('customerDisplay');
+  const cdContent = document.getElementById('cdContent');
+  const closeCustomerDisplayBtn = document.getElementById('closeCustomerDisplay');
+  const scanAgainBtn = document.getElementById('scanAgainBtn');
+
+  function renderCustomerPrice(itemNo, name, price){
+    cdContent.innerHTML = `
+      <div class="cd-item-no">Item No. ${itemNo}</div>
+      <div class="cd-name">${name}</div>
+      <div class="cd-price">SAR ${price}</div>`;
+  }
+
+  function showCustomerDisplayFromData(itemNo, name, price){
+    customerDisplay.classList.add('open');
+    renderCustomerPrice(itemNo, name, price);
+  }
+
+  function showCustomerDisplay(barcode){
+    customerDisplay.classList.add('open');
+    cdContent.innerHTML = '<div class="cd-loading">Looking up item…</div>';
+
+    fetch(`{% url 'customer_lookup' %}?barcode=${encodeURIComponent(barcode)}`)
+      .then(res => res.json())
+      .then(data => {
+        if(!data.found){
+          cdContent.innerHTML = `
+            <div class="cd-not-found">
+              <div class="cd-not-found-icon">?</div>
+              <div class="cd-not-found-text">Item not found</div>
+              <div class="cd-not-found-code">${barcode}</div>
+            </div>`;
+          return;
+        }
+        renderCustomerPrice(data.item_no, data.name, data.price);
+      })
+      .catch(() => {
+        cdContent.innerHTML = '<div class="cd-not-found-text">Could not look up item — check connection.</div>';
+      });
+  }
+
+  document.querySelectorAll('.show-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      showCustomerDisplayFromData(
+        btn.dataset.itemNo,
+        btn.dataset.name,
+        btn.dataset.price
+      );
+    });
+  });
+
+  closeCustomerDisplayBtn.addEventListener('click', () => {
+    customerDisplay.classList.remove('open');
+  });
+
+  scanAgainBtn.addEventListener('click', () => {
+    customerDisplay.classList.remove('open');
+    scanBtn.click();
+  });
 })();
 </script>
 {% endblock %}

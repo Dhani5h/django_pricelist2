@@ -9,9 +9,9 @@ class CategoryAdmin(admin.ModelAdmin):
 
 @admin.register(Item)
 class ItemAdmin(admin.ModelAdmin):
-    list_display = ['code', 'name', 'category', 'wholesale_price', 'retail_price', 'margin_display', 'updated_at']
+    list_display = ['code', 'barcode', 'name', 'category', 'wholesale_price', 'retail_price', 'margin_display', 'updated_at']
     list_filter = ['category']
-    search_fields = ['code', 'name']
+    search_fields = ['code', 'barcode', 'name']
     ordering = ['category', 'name']
     list_select_related = ['category']
 

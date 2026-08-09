@@ -66,6 +66,30 @@ def suggest(request):
     return JsonResponse({'results': results})
 
 
+def customer_lookup(request):
+    """
+    JSON endpoint for the customer-facing barcode display.
+    Deliberately returns ONLY item no, name, and retail price —
+    never wholesale price or margin, since this is meant to be shown
+    on-screen to customers after a barcode scan.
+    """
+    barcode = request.GET.get('barcode', '').strip()
+    if not barcode:
+        return JsonResponse({'found': False})
+
+    try:
+        item = Item.objects.get(barcode=barcode)
+    except Item.DoesNotExist:
+        return JsonResponse({'found': False})
+
+    return JsonResponse({
+        'found': True,
+        'item_no': item.code,
+        'name': item.name,
+        'price': f'{item.retail_price:.2f}',
+    })
+
+
 @login_required
 def bulk_add(request):
     result_message = None
@@ -82,6 +106,7 @@ def bulk_add(request):
                 skipped += 1
                 continue
             code, name, category_name, wholesale, retail = parts[:5]
+            barcode = parts[5] if len(parts) > 5 and parts[5] else None
             try:
                 wholesale_price = float(wholesale)
                 retail_price = float(retail)
@@ -100,6 +125,7 @@ def bulk_add(request):
                     'category': category,
                     'wholesale_price': wholesale_price,
                     'retail_price': retail_price,
+                    'barcode': barcode,
                 },
             )
             added += 1
