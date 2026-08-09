@@ -68,10 +68,10 @@ def suggest(request):
 
 def customer_lookup(request):
     """
-    JSON endpoint for the customer-facing barcode display.
-    Deliberately returns ONLY item no, name, and retail price —
-    never wholesale price or margin, since this is meant to be shown
-    on-screen to customers after a barcode scan.
+    JSON endpoint for the price display screen (shown after a barcode scan).
+    Returns both wholesale and retail — this is a wholesale shop, so
+    wholesale is the primary price shown; retail is available via a
+    toggle on the same screen.
     """
     barcode = request.GET.get('barcode', '').strip()
     if not barcode:
@@ -86,7 +86,8 @@ def customer_lookup(request):
         'found': True,
         'item_no': item.code,
         'name': item.name,
-        'price': f'{item.retail_price:.2f}',
+        'wholesale': f'{item.wholesale_price:.2f}',
+        'retail': f'{item.retail_price:.2f}',
     })
 
 

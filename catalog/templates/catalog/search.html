@@ -59,7 +59,8 @@
         <button class="icon-btn show-btn" type="button"
           data-item-no="{{ item.code }}"
           data-name="{{ item.name }}"
-          data-price="{{ item.retail_price }}">Show</button>
+          data-wholesale="{{ item.wholesale_price }}"
+          data-retail="{{ item.retail_price }}">Show</button>
       </div>
     {% endfor %}
   {% endfor %}
@@ -229,17 +230,43 @@
   const cdContent = document.getElementById('cdContent');
   const closeCustomerDisplayBtn = document.getElementById('closeCustomerDisplay');
   const scanAgainBtn = document.getElementById('scanAgainBtn');
+  const VAT_RATE = 0.15;
+  let cdState = null;
 
-  function renderCustomerPrice(itemNo, name, price){
+  function paintCustomerPrice(){
+    if(!cdState) return;
+    const base = cdState.mode === 'wholesale' ? cdState.wholesale : cdState.retail;
+    const baseNum = parseFloat(base);
+    const vatPrice = (baseNum * (1 + VAT_RATE)).toFixed(2);
+    const dozenVat = (baseNum * 12 * (1 + VAT_RATE)).toFixed(2);
+    const label = cdState.mode === 'wholesale' ? 'Wholesale price' : 'Retail price';
+    const switchLabel = cdState.mode === 'wholesale' ? 'Switch to retail' : 'Switch to wholesale';
+
     cdContent.innerHTML = `
-      <div class="cd-item-no">Item No. ${itemNo}</div>
-      <div class="cd-name">${name}</div>
-      <div class="cd-price">SAR ${price}</div>`;
+      <div class="cd-item-no">Item No. ${cdState.itemNo}</div>
+      <div class="cd-name">${cdState.name}</div>
+      <div class="cd-price-label">${label}</div>
+      <div class="cd-price">SAR ${baseNum.toFixed(2)}</div>
+      <div class="cd-extra-prices">
+        <div class="cd-extra-row"><span>Unit incl. 15% VAT</span><span>SAR ${vatPrice}</span></div>
+        <div class="cd-extra-row"><span>Dozen incl. VAT</span><span>SAR ${dozenVat}</span></div>
+      </div>
+      <button class="cd-switch-btn" id="cdSwitchBtn" type="button">${switchLabel}</button>`;
+
+    document.getElementById('cdSwitchBtn').addEventListener('click', () => {
+      cdState.mode = cdState.mode === 'wholesale' ? 'retail' : 'wholesale';
+      paintCustomerPrice();
+    });
   }
 
-  function showCustomerDisplayFromData(itemNo, name, price){
+  function renderCustomerPrice(itemNo, name, wholesale, retail){
+    cdState = { itemNo, name, wholesale, retail, mode: 'wholesale' };
+    paintCustomerPrice();
+  }
+
+  function showCustomerDisplayFromData(itemNo, name, wholesale, retail){
     customerDisplay.classList.add('open');
-    renderCustomerPrice(itemNo, name, price);
+    renderCustomerPrice(itemNo, name, wholesale, retail);
   }
 
   function showCustomerDisplay(barcode){
@@ -258,7 +285,7 @@
             </div>`;
           return;
         }
-        renderCustomerPrice(data.item_no, data.name, data.price);
+        renderCustomerPrice(data.item_no, data.name, data.wholesale, data.retail);
       })
       .catch(() => {
         cdContent.innerHTML = '<div class="cd-not-found-text">Could not look up item — check connection.</div>';
@@ -270,7 +297,8 @@
       showCustomerDisplayFromData(
         btn.dataset.itemNo,
         btn.dataset.name,
-        btn.dataset.price
+        btn.dataset.wholesale,
+        btn.dataset.retail
       );
     });
   });

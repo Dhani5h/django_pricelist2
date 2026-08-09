@@ -120,7 +120,25 @@
   }
   .cd-not-found-text{color:var(--paper);font-size:20px;}
   .cd-not-found-code{color:rgba(241,241,236,0.5);font-family:monospace;font-size:14px;}
-  .cd-scan-again{margin-top:36px;}
+  .cd-price-label{
+    font-size:14px;font-weight:600;color:rgba(232,193,90,0.85);
+    text-transform:uppercase;letter-spacing:0.06em;
+  }
+  .cd-extra-prices{
+    display:flex;flex-direction:column;gap:8px;margin-top:8px;width:100%;max-width:320px;
+  }
+  .cd-extra-row{
+    display:flex;justify-content:space-between;gap:16px;
+    font-size:15px;color:rgba(241,241,236,0.85);
+    background:rgba(255,255,255,0.06);border-radius:8px;padding:8px 14px;
+  }
+  .cd-switch-btn{
+    margin-top:20px;font-family:'Inter',sans-serif;font-size:13px;font-weight:500;
+    background:transparent;border:1px solid rgba(241,241,236,0.35);color:var(--paper);
+    border-radius:8px;padding:8px 16px;cursor:pointer;
+  }
+  .cd-switch-btn:hover{background:rgba(255,255,255,0.08);}
+  .cd-scan-again{margin-top:20px;}
   @media (max-width:480px){
     .cd-price{font-size:56px;padding:10px 24px;border-radius:14px;}
     .cd-name{font-size:18px;}
