@@ -67,6 +67,13 @@
         <button class="btn ghost" type="button" id="closeScan">Cancel</button>
       </span>
     </div>
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line);">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">Camera not picking it up? Type the number printed under the barcode:</div>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="manualBarcodeInput" placeholder="Barcode number" inputmode="numeric" autocomplete="off" style="flex:1;">
+        <button class="btn" type="button" id="manualBarcodeSubmit">Use</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -326,28 +333,33 @@
     scanModal.classList.remove('open');
   }
 
+  // Shared by an actual camera decode and by typing the number in manually —
+  // both end up doing the same thing with the resulting barcode text.
+  function handleScanResult(text){
+    stopScanner();
+    if(linkTarget){
+      const code = linkTarget;
+      linkTarget = null;
+      saveItemField(code, { barcode: text });
+    } else {
+      showCustomerDisplay(text);
+    }
+  }
+
   async function startScan(){
     const reader = getCodeReader();
     scanning = true;
     const cam = backCameras[cameraIndex];
     const constraints = cam
-      ? { video: { deviceId: { exact: cam.deviceId } } }
-      : { video: { facingMode: { ideal: 'environment' } } };
+      ? { video: { deviceId: { exact: cam.deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } } }
+      : { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } };
 
     reader.decodeFromConstraints(
       constraints,
       'scanVideo',
       (result, err) => {
         if(result){
-          stopScanner();
-          const text = result.getText();
-          if(linkTarget){
-            const code = linkTarget;
-            linkTarget = null;
-            saveItemField(code, { barcode: text });
-          } else {
-            showCustomerDisplay(text);
-          }
+          handleScanResult(result.getText());
         }
         // err fires continuously on frames with no barcode found — ignore those
       }
@@ -360,6 +372,7 @@
   async function openScanner(title, statusText){
     scanModalTitle.textContent = title;
     currentScan = { title, statusText };
+    document.getElementById('manualBarcodeInput').value = '';
     if(typeof ZXing === 'undefined'){
       scanStatus.textContent = 'Scanner failed to load. Check your internet connection.';
       scanModal.classList.add('open');
@@ -381,6 +394,22 @@
     if(codeReader && scanning) codeReader.reset();
     scanStatus.textContent = 'Switching camera…';
     startScan();
+  });
+
+  const manualBarcodeInput = document.getElementById('manualBarcodeInput');
+  const manualBarcodeSubmit = document.getElementById('manualBarcodeSubmit');
+
+  manualBarcodeSubmit.addEventListener('click', () => {
+    const val = manualBarcodeInput.value.trim();
+    if(!val) return;
+    handleScanResult(val);
+  });
+
+  manualBarcodeInput.addEventListener('keydown', (e) => {
+    if(e.key === 'Enter'){
+      e.preventDefault();
+      manualBarcodeSubmit.click();
+    }
   });
 
   scanBtn.addEventListener('click', () => {
