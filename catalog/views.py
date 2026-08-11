@@ -10,14 +10,15 @@ from .models import Category, Item
 def search(request):
     query = request.GET.get('q', '').strip()
     category_id = request.GET.get('category', '')
+    has_search = bool(query or category_id)
 
-    items = Item.objects.select_related('category').all()
-
-    if query:
-        items = items.filter(Q(code__icontains=query) | Q(name__icontains=query))
-
-    if category_id:
-        items = items.filter(category_id=category_id)
+    items = []
+    if has_search:
+        items = Item.objects.select_related('category').all()
+        if query:
+            items = items.filter(Q(code__icontains=query) | Q(name__icontains=query))
+        if category_id:
+            items = items.filter(category_id=category_id)
 
     categories = Category.objects.all()
 
@@ -26,7 +27,9 @@ def search(request):
         'categories': categories,
         'query': query,
         'selected_category': category_id,
+        'has_search': has_search,
         'total_count': Item.objects.count(),
+        'is_staff': request.user.is_authenticated,
     }
     return render(request, 'catalog/search.html', context)
 
@@ -59,7 +62,7 @@ def suggest(request):
             'name': item.name,
             'category': item.category.name if item.category else '',
             'wholesale': f'{item.wholesale_price:.2f}',
-            'retail': f'{item.retail_price:.2f}',
+            'retail': f'{item.retail_price:.2f}' if item.retail_price is not None else None,
         }
         for item in items
     ]
@@ -87,7 +90,64 @@ def customer_lookup(request):
         'item_no': item.code,
         'name': item.name,
         'wholesale': f'{item.wholesale_price:.2f}',
-        'retail': f'{item.retail_price:.2f}',
+        'retail': f'{item.retail_price:.2f}' if item.retail_price is not None else None,
+    })
+
+
+@login_required
+def item_quick_update(request):
+    """
+    Staff-only endpoint for filling in a barcode (usually from a scan) and/or
+    a retail price on an item that's missing one. Only whichever field is
+    sent gets touched.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'}, status=405)
+
+    code = request.POST.get('code', '').strip()
+    if not code:
+        return JsonResponse({'ok': False, 'error': 'Missing item code'}, status=400)
+
+    try:
+        item = Item.objects.get(code=code)
+    except Item.DoesNotExist:
+        return JsonResponse({'ok': False, 'error': 'Item not found'}, status=404)
+
+    barcode = request.POST.get('barcode')
+    retail_price = request.POST.get('retail_price')
+    updated_fields = []
+
+    if barcode is not None:
+        barcode = barcode.strip()
+        if barcode:
+            conflict = Item.objects.filter(barcode=barcode).exclude(pk=item.pk).first()
+            if conflict:
+                return JsonResponse({
+                    'ok': False,
+                    'error': f'That barcode is already used by {conflict.code} — {conflict.name}',
+                }, status=409)
+            item.barcode = barcode
+            updated_fields.append('barcode')
+
+    if retail_price is not None:
+        retail_price = retail_price.strip()
+        if retail_price:
+            try:
+                item.retail_price = float(retail_price)
+            except ValueError:
+                return JsonResponse({'ok': False, 'error': 'Retail price must be a number'}, status=400)
+            updated_fields.append('retail_price')
+
+    if not updated_fields:
+        return JsonResponse({'ok': False, 'error': 'Nothing to update'}, status=400)
+
+    item.save()
+
+    return JsonResponse({
+        'ok': True,
+        'code': item.code,
+        'barcode': item.barcode,
+        'retail_price': f'{item.retail_price:.2f}' if item.retail_price is not None else None,
     })
 
 
@@ -103,14 +163,17 @@ def bulk_add(request):
 
         for line in lines:
             parts = [p.strip() for p in line.split(',')]
-            if len(parts) < 5:
+            # code, name, category, wholesale price are required;
+            # retail price and barcode are optional.
+            if len(parts) < 4:
                 skipped += 1
                 continue
-            code, name, category_name, wholesale, retail = parts[:5]
+            code, name, category_name, wholesale = parts[:4]
+            retail = parts[4] if len(parts) > 4 else ''
             barcode = parts[5] if len(parts) > 5 and parts[5] else None
             try:
                 wholesale_price = float(wholesale)
-                retail_price = float(retail)
+                retail_price = float(retail) if retail else None
             except ValueError:
                 skipped += 1
                 continue

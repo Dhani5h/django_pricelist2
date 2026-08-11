@@ -1,34 +1,61 @@
 {% extends "catalog/base.html" %}
 {% block title %}Price book{% endblock %}
 {% block content %}
+{% if is_staff %}{% csrf_token %}{% endif %}
+
+{% if has_search %}
 <header>
-  <h1>Price book</h1>
+  <div class="brand">
+    <span class="barcode-mark" aria-hidden="true"></span>
+    <h1>Price book</h1>
+  </div>
   <span class="count">{{ total_count }} item{{ total_count|pluralize }}</span>
 </header>
 
-<nav style="margin-bottom:14px;">
+<nav style="margin-bottom:18px;">
+  <a href="{% url 'search' %}">New search</a>
   <a href="/admin/">Edit items (staff)</a>
   <a href="{% url 'bulk_add' %}">Bulk add (staff)</a>
 </nav>
+{% endif %}
 
-<form class="toolbar" method="get" id="searchForm" autocomplete="off">
-  <div style="position:relative;flex:1;min-width:160px;">
-    <input id="q" type="text" name="q" placeholder="Search by code or name" value="{{ query }}" autocomplete="off">
-    <div id="suggestions"></div>
-  </div>
-  <select name="category" onchange="this.form.submit()">
-    <option value="">All categories</option>
-    {% for c in categories %}
-      <option value="{{ c.id }}" {% if selected_category == c.id|stringformat:"s" %}selected{% endif %}>{{ c.name }}</option>
-    {% endfor %}
-  </select>
-  <button class="btn" type="submit">Search</button>
-  <button class="btn ghost" type="button" id="scanBtn">📷 Scan</button>
-</form>
+<div class="{% if has_search %}toolbar-wrap{% else %}hero{% endif %}">
+  {% if not has_search %}
+    <span class="barcode-mark barcode-mark-lg" aria-hidden="true"></span>
+    <h1 class="hero-title">Price book</h1>
+    <p class="hero-sub">Search a code or name, or scan a barcode</p>
+  {% endif %}
+
+  <form class="toolbar {% if not has_search %}toolbar-centered{% endif %}" method="get" id="searchForm" autocomplete="off">
+    <div style="position:relative;flex:1;min-width:160px;">
+      <input id="q" type="text" name="q" placeholder="Search by code or name" value="{{ query }}" autocomplete="off">
+      <div id="suggestions"></div>
+    </div>
+    {% if has_search %}
+    <select name="category" onchange="this.form.submit()">
+      <option value="">All categories</option>
+      {% for c in categories %}
+        <option value="{{ c.id }}" {% if selected_category == c.id|stringformat:"s" %}selected{% endif %}>{{ c.name }}</option>
+      {% endfor %}
+    </select>
+    {% endif %}
+    <button class="btn" type="submit">Search</button>
+    <button class="btn ghost" type="button" id="scanBtn">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>Scan
+    </button>
+  </form>
+
+  {% if not has_search %}
+    <nav class="hero-nav">
+      <a href="/admin/">Edit items (staff)</a>
+      <a href="{% url 'bulk_add' %}">Bulk add (staff)</a>
+    </nav>
+  {% endif %}
+</div>
 
 <div class="modal-overlay" id="scanModal">
   <div class="modal-box">
-    <h3>Scan a barcode</h3>
+    <h3 id="scanModalTitle">Scan a barcode</h3>
     <div id="reader">
       <video id="scanVideo" style="width:100%;border-radius:8px;background:#000;" playsinline muted></video>
       <div class="scan-guide"></div>
@@ -40,32 +67,84 @@
   </div>
 </div>
 
+{% if is_staff %}
+<div class="modal-overlay" id="detailsModal">
+  <div class="modal-box">
+    <h3>Complete item details</h3>
+    <p style="font-size:13px;color:var(--muted);margin:-6px 0 4px;" id="detailsItemLabel"></p>
+
+    <div class="field-row" id="barcodeRow">
+      <span class="field-label">Barcode</span>
+      <span class="field-action" id="barcodeAction"></span>
+    </div>
+    <div class="field-row" id="retailRow">
+      <span class="field-label">Retail price</span>
+      <span class="field-action" id="retailAction"></span>
+    </div>
+
+    <div class="inline-status" id="detailsStatus"></div>
+
+    <div class="modal-actions">
+      <span></span>
+      <button class="btn ghost" type="button" id="closeDetails">Done</button>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <div class="customer-display" id="customerDisplay">
   <button class="cd-close" type="button" id="closeCustomerDisplay" aria-label="Close">✕</button>
   <div class="cd-content" id="cdContent"></div>
-  <button class="btn cd-scan-again" type="button" id="scanAgainBtn">📷 Scan another item</button>
+  <button class="btn cd-scan-again" type="button" id="scanAgainBtn">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>Scan another item
+  </button>
 </div>
 
-{% regroup items by category as category_list %}
-{% if items %}
-  {% for group in category_list %}
-    <div class="cat-title">{{ group.grouper|default:"Uncategorized" }}</div>
-    {% for item in group.list %}
-      <div class="row">
-        <span class="code">{{ item.code }}</span>
-        <span class="name">{{ item.name }}</span>
-        <span class="price wholesale">W SAR {{ item.wholesale_price }}</span>
-        <span class="price retail">R SAR {{ item.retail_price }}</span>
-        <button class="icon-btn show-btn" type="button"
+{% if has_search %}
+  {% if items %}
+    {% if items|length == 1 %}
+      {% with item=items.0 %}
+        <div id="autoShowData"
           data-item-no="{{ item.code }}"
           data-name="{{ item.name }}"
           data-wholesale="{{ item.wholesale_price }}"
-          data-retail="{{ item.retail_price }}">Show</button>
-      </div>
+          data-retail="{{ item.retail_price|default_if_none:'' }}"
+          hidden></div>
+      {% endwith %}
+    {% endif %}
+    {% regroup items by category as category_list %}
+    {% for group in category_list %}
+      <div class="cat-title">{{ group.grouper|default:"Uncategorized" }}</div>
+      {% for item in group.list %}
+        <div class="row">
+          <span class="code">{{ item.code }}</span>
+          <span class="name">{{ item.name }}</span>
+          <span class="price wholesale">W SAR {{ item.wholesale_price }}</span>
+          {% if item.retail_price is not None %}
+            <span class="price retail">R SAR {{ item.retail_price }}</span>
+          {% else %}
+            <span class="price retail muted">R —</span>
+          {% endif %}
+          {% if is_staff %}{% if not item.barcode or item.retail_price is None %}
+            <button class="warn-btn" type="button" title="Missing details — click to fix" aria-label="Missing details"
+              data-code="{{ item.code }}"
+              data-name="{{ item.name }}"
+              data-has-barcode="{{ item.barcode|yesno:'1,' }}"
+              data-retail="{{ item.retail_price|default_if_none:'' }}">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            </button>
+          {% endif %}{% endif %}
+          <button class="icon-btn show-btn" type="button"
+            data-item-no="{{ item.code }}"
+            data-name="{{ item.name }}"
+            data-wholesale="{{ item.wholesale_price }}"
+            data-retail="{{ item.retail_price|default_if_none:'' }}">Show</button>
+        </div>
+      {% endfor %}
     {% endfor %}
-  {% endfor %}
-{% else %}
-  <div class="empty">No items match your search.</div>
+  {% else %}
+    <div class="empty">No items match your search.</div>
+  {% endif %}
 {% endif %}
 
 <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
@@ -95,7 +174,7 @@
       <div class="suggestion" data-index="${i}" data-code="${r.code}">
         <span class="s-code">${r.code}</span>
         <span class="s-name">${r.name}</span>
-        <span class="s-price">SAR ${r.retail}</span>
+        <span class="s-price">${r.retail ? 'SAR ' + r.retail : '—'}</span>
       </div>
     `).join('');
     box.classList.add('open');
@@ -167,10 +246,14 @@
   // --- Barcode scanning ---------------------------------------------
   const scanBtn = document.getElementById('scanBtn');
   const scanModal = document.getElementById('scanModal');
+  const scanModalTitle = document.getElementById('scanModalTitle');
   const closeScanBtn = document.getElementById('closeScan');
   const scanStatus = document.getElementById('scanStatus');
+  const detailsModal = document.getElementById('detailsModal');
   let codeReader = null;
   let scanning = false;
+  let linkTarget = null; // set to an item code when scanning to attach a barcode to it, rather than looking one up
+  let saveItemField = function(){}; // replaced below when the staff details modal is present
 
   function getCodeReader(){
     if(codeReader) return codeReader;
@@ -197,14 +280,15 @@
     scanModal.classList.remove('open');
   }
 
-  scanBtn.addEventListener('click', () => {
+  function openScanner(title, statusText){
+    scanModalTitle.textContent = title;
     if(typeof ZXing === 'undefined'){
       scanStatus.textContent = 'Scanner failed to load. Check your internet connection.';
       scanModal.classList.add('open');
       return;
     }
     scanModal.classList.add('open');
-    scanStatus.textContent = 'Point the camera at a barcode';
+    scanStatus.textContent = statusText;
     const reader = getCodeReader();
     scanning = true;
     reader.decodeFromConstraints(
@@ -213,7 +297,14 @@
       (result, err) => {
         if(result){
           stopScanner();
-          showCustomerDisplay(result.getText());
+          const text = result.getText();
+          if(linkTarget){
+            const code = linkTarget;
+            linkTarget = null;
+            saveItemField(code, { barcode: text });
+          } else {
+            showCustomerDisplay(text);
+          }
         }
         // err fires continuously on frames with no barcode found — ignore those
       }
@@ -221,9 +312,20 @@
       console.error('Camera start failed:', err);
       scanStatus.textContent = 'Could not start camera: ' + (err && err.name ? err.name : err);
     });
+  }
+
+  scanBtn.addEventListener('click', () => {
+    linkTarget = null;
+    openScanner('Scan a barcode', 'Point the camera at a barcode');
   });
 
-  closeScanBtn.addEventListener('click', stopScanner);
+  closeScanBtn.addEventListener('click', () => {
+    stopScanner();
+    if(linkTarget){
+      linkTarget = null;
+      if(detailsModal) detailsModal.classList.add('open');
+    }
+  });
 
   // --- Customer-facing price display ---------------------------------
   const customerDisplay = document.getElementById('customerDisplay');
@@ -235,28 +337,33 @@
 
   function paintCustomerPrice(){
     if(!cdState) return;
-    const base = cdState.mode === 'wholesale' ? cdState.wholesale : cdState.retail;
+    const hasRetail = cdState.retail !== null && cdState.retail !== undefined && cdState.retail !== '';
+    const isWholesale = cdState.mode === 'wholesale';
+    const base = isWholesale ? cdState.wholesale : cdState.retail;
     const baseNum = parseFloat(base);
     const vatPrice = (baseNum * (1 + VAT_RATE)).toFixed(2);
     const dozenVat = (baseNum * 12 * (1 + VAT_RATE)).toFixed(2);
-    const label = cdState.mode === 'wholesale' ? 'Wholesale price' : 'Retail price';
-    const switchLabel = cdState.mode === 'wholesale' ? 'Switch to retail' : 'Switch to wholesale';
+    const label = isWholesale ? 'Wholesale price' : 'Retail price';
+    const switchLabel = isWholesale ? 'Switch to retail' : 'Switch to wholesale';
 
     cdContent.innerHTML = `
       <div class="cd-item-no">Item No. ${cdState.itemNo}</div>
       <div class="cd-name">${cdState.name}</div>
       <div class="cd-price-label">${label}</div>
       <div class="cd-price">SAR ${baseNum.toFixed(2)}</div>
+      ${isWholesale ? `
       <div class="cd-extra-prices">
         <div class="cd-extra-row"><span>Unit incl. 15% VAT</span><span>SAR ${vatPrice}</span></div>
         <div class="cd-extra-row"><span>Dozen incl. VAT</span><span>SAR ${dozenVat}</span></div>
-      </div>
-      <button class="cd-switch-btn" id="cdSwitchBtn" type="button">${switchLabel}</button>`;
+      </div>` : ''}
+      ${hasRetail ? `<button class="cd-switch-btn" id="cdSwitchBtn" type="button">${switchLabel}</button>` : ''}`;
 
-    document.getElementById('cdSwitchBtn').addEventListener('click', () => {
-      cdState.mode = cdState.mode === 'wholesale' ? 'retail' : 'wholesale';
-      paintCustomerPrice();
-    });
+    if(hasRetail){
+      document.getElementById('cdSwitchBtn').addEventListener('click', () => {
+        cdState.mode = cdState.mode === 'wholesale' ? 'retail' : 'wholesale';
+        paintCustomerPrice();
+      });
+    }
   }
 
   function renderCustomerPrice(itemNo, name, wholesale, retail){
@@ -266,7 +373,7 @@
 
   function showCustomerDisplayFromData(itemNo, name, wholesale, retail){
     customerDisplay.classList.add('open');
-    renderCustomerPrice(itemNo, name, wholesale, retail);
+    renderCustomerPrice(itemNo, name, wholesale, retail || null);
   }
 
   function showCustomerDisplay(barcode){
@@ -302,6 +409,126 @@
       );
     });
   });
+
+  // --- Fix missing barcode / retail price (staff only) ----------------
+  if(detailsModal){
+    const detailsItemLabel = document.getElementById('detailsItemLabel');
+    const barcodeAction = document.getElementById('barcodeAction');
+    const retailAction = document.getElementById('retailAction');
+    const detailsStatus = document.getElementById('detailsStatus');
+    const closeDetailsBtn = document.getElementById('closeDetails');
+    const csrfInput = document.querySelector('[name=csrfmiddlewaretoken]');
+    const csrfToken = csrfInput ? csrfInput.value : '';
+
+    function openDetails(code, name, hasBarcode, retail){
+      detailsModal.dataset.code = code;
+      detailsModal.dataset.name = name;
+      detailsItemLabel.textContent = `${code} — ${name}`;
+      detailsStatus.textContent = '';
+      detailsStatus.className = 'inline-status';
+
+      if(hasBarcode){
+        barcodeAction.innerHTML = `<span class="field-value">On file</span>`;
+      } else {
+        barcodeAction.innerHTML = `<button class="show-btn" type="button" id="scanForBarcodeBtn">Scan to add</button>`;
+        document.getElementById('scanForBarcodeBtn').addEventListener('click', () => {
+          linkTarget = code;
+          detailsModal.classList.remove('open');
+          openScanner(`Scan barcode — ${code}`, 'Point the camera at the barcode');
+        });
+      }
+
+      if(retail){
+        retailAction.innerHTML = `<span class="field-value">SAR ${retail}</span>`;
+      } else {
+        retailAction.innerHTML = `
+          <input type="number" step="0.01" min="0" placeholder="0.00" id="retailInput">
+          <button class="btn" type="button" id="saveRetailBtn">Save</button>`;
+        document.getElementById('saveRetailBtn').addEventListener('click', () => {
+          const val = document.getElementById('retailInput').value.trim();
+          if(!val) return;
+          saveItemField(code, { retail_price: val });
+        });
+      }
+
+      detailsModal.classList.add('open');
+    }
+
+    function updateRowAfterFix(code, data){
+      document.querySelectorAll('.row').forEach(row => {
+        const showBtn = row.querySelector('.show-btn');
+        if(!showBtn || showBtn.dataset.itemNo !== code) return;
+        if(data.retail_price){
+          showBtn.dataset.retail = data.retail_price;
+          const retailSpan = row.querySelector('.price.retail');
+          if(retailSpan){
+            retailSpan.textContent = `R SAR ${data.retail_price}`;
+            retailSpan.classList.remove('muted');
+          }
+        }
+        const warnBtn = row.querySelector('.warn-btn');
+        if(warnBtn){
+          const hasBarcode = !!data.barcode;
+          const hasRetail = !!data.retail_price;
+          if(hasBarcode && hasRetail){
+            warnBtn.remove();
+          } else {
+            warnBtn.dataset.hasBarcode = hasBarcode ? '1' : '';
+            warnBtn.dataset.retail = hasRetail ? data.retail_price : '';
+          }
+        }
+      });
+    }
+
+    saveItemField = function(code, fields){
+      const body = new URLSearchParams({ code, ...fields });
+      fetch('{% url "item_quick_update" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrfToken, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+      })
+        .then(res => res.json())
+        .then(data => {
+          detailsModal.classList.add('open');
+          if(!data.ok){
+            detailsStatus.textContent = data.error || 'Could not save.';
+            detailsStatus.className = 'inline-status error';
+            return;
+          }
+          updateRowAfterFix(code, data);
+          openDetails(code, detailsModal.dataset.name, !!data.barcode, data.retail_price);
+          detailsStatus.textContent = 'Saved.';
+          detailsStatus.className = 'inline-status success';
+        })
+        .catch(() => {
+          detailsModal.classList.add('open');
+          detailsStatus.textContent = 'Network error — try again.';
+          detailsStatus.className = 'inline-status error';
+        });
+    };
+
+    document.querySelectorAll('.warn-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        openDetails(btn.dataset.code, btn.dataset.name, btn.dataset.hasBarcode === '1', btn.dataset.retail);
+      });
+    });
+
+    closeDetailsBtn.addEventListener('click', () => {
+      detailsModal.classList.remove('open');
+    });
+  }
+
+  // A single match (e.g. an exact code, or a search narrow enough to
+  // find one item) opens straight into the big price view — no extra tap.
+  const autoShowData = document.getElementById('autoShowData');
+  if(autoShowData){
+    showCustomerDisplayFromData(
+      autoShowData.dataset.itemNo,
+      autoShowData.dataset.name,
+      autoShowData.dataset.wholesale,
+      autoShowData.dataset.retail
+    );
+  }
 
   closeCustomerDisplayBtn.addEventListener('click', () => {
     customerDisplay.classList.remove('open');

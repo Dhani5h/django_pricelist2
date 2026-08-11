@@ -2,10 +2,13 @@
 {% block title %}Bulk add items{% endblock %}
 {% block content %}
 <header>
-  <h1>Bulk add items</h1>
+  <div class="brand">
+    <span class="barcode-mark" aria-hidden="true"></span>
+    <h1>Bulk add items</h1>
+  </div>
 </header>
 
-<nav style="margin-bottom:14px;">
+<nav style="margin-bottom:18px;">
   <a href="{% url 'search' %}">Back to price book</a>
 </nav>
 
@@ -15,15 +18,16 @@
   </ul>
 {% endif %}
 
-<p style="font-size:13px;color:var(--muted);">
-  One item per line: <code>code, name, category, wholesale price, retail price, barcode (optional)</code>.
+<p style="font-size:13px;color:var(--muted);line-height:1.6;">
+  One item per line: <code class="mono" style="background:var(--card);border:1px solid var(--line-strong);border-radius:3px;padding:1px 5px;">code, name, category, wholesale price, retail price, barcode</code>.
+  Retail price and barcode can be left blank if you don't have them yet — just leave the spot empty (e.g. <code class="mono" style="background:var(--card);border:1px solid var(--line-strong);border-radius:3px;padding:1px 5px;">A-102, 16oz claw hammer, Hand tools, 8.50</code>).
   Existing codes will be updated, new codes will be created.
 </p>
 
 <form method="post">
   {% csrf_token %}
-  <textarea name="bulk_text" rows="10" style="width:100%;font-family:monospace;"
-    placeholder="A-102, 16oz claw hammer, Hand tools, 8.50, 14.99, 012345678905&#10;B-014, Galvanized bucket 5gal, Storage, 3.20, 6.99, 012345678912"></textarea>
+  <textarea name="bulk_text" rows="10" style="width:100%;font-family:'IBM Plex Mono',monospace;"
+    placeholder="A-102, 16oz claw hammer, Hand tools, 8.50, 14.99, 012345678905&#10;B-014, Galvanized bucket 5gal, Storage, 3.20&#10;C-201, Rope 10m, Storage, 2.10, , 012345678929"></textarea>
   <div style="margin-top:10px;">
     <button class="btn" type="submit">Add lines</button>
   </div>

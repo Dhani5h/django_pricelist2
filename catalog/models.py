@@ -23,7 +23,7 @@ class Item(models.Model):
         Category, on_delete=models.SET_NULL, null=True, blank=True, related_name='items'
     )
     wholesale_price = models.DecimalField(max_digits=10, decimal_places=2)
-    retail_price = models.DecimalField(max_digits=10, decimal_places=2)
+    retail_price = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -31,6 +31,14 @@ class Item(models.Model):
 
     def __str__(self):
         return f'{self.code} — {self.name}'
+
+    def save(self, *args, **kwargs):
+        # An empty string in a unique field isn't the same as NULL to the database,
+        # so two blank barcodes would collide. Normalize blank -> None on every save
+        # so items can be added without a barcode.
+        if not self.barcode:
+            self.barcode = None
+        super().save(*args, **kwargs)
 
     @property
     def margin_percent(self):
