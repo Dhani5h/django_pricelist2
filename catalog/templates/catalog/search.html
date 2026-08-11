@@ -62,7 +62,10 @@
     </div>
     <div class="modal-actions">
       <span class="scan-status" id="scanStatus">Point the camera at a barcode</span>
-      <button class="btn ghost" type="button" id="closeScan">Cancel</button>
+      <span style="display:flex;gap:8px;">
+        <button class="btn ghost" type="button" id="switchCamera" hidden>Switch camera</button>
+        <button class="btn ghost" type="button" id="closeScan">Cancel</button>
+      </span>
     </div>
   </div>
 </div>
@@ -248,12 +251,16 @@
   const scanModal = document.getElementById('scanModal');
   const scanModalTitle = document.getElementById('scanModalTitle');
   const closeScanBtn = document.getElementById('closeScan');
+  const switchCameraBtn = document.getElementById('switchCamera');
   const scanStatus = document.getElementById('scanStatus');
   const detailsModal = document.getElementById('detailsModal');
   let codeReader = null;
   let scanning = false;
   let linkTarget = null; // set to an item code when scanning to attach a barcode to it, rather than looking one up
   let saveItemField = function(){}; // replaced below when the staff details modal is present
+  let backCameras = [];   // candidate back-facing cameras, best guess first
+  let cameraIndex = 0;    // which candidate we're currently using
+  let currentScan = null; // { title, statusText } — so "Switch camera" can restart with the same intent
 
   function getCodeReader(){
     if(codeReader) return codeReader;
@@ -272,6 +279,45 @@
     return codeReader;
   }
 
+  // Phones with multiple rear lenses (ultra-wide/wide/telephoto) don't reliably
+  // hand you the main 1x lens for facingMode:'environment' — you can end up on
+  // the ultra-wide lens, which can't focus close enough to read a barcode.
+  // Enumerate the actual back cameras and rank them, avoiding ultra-wide/tele.
+  async function findBackCameras(){
+    if(backCameras.length) return backCameras;
+    try {
+      // Labels are blank until permission has been granted once.
+      const tempStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      tempStream.getTracks().forEach(t => t.stop());
+
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoInputs = devices.filter(d => d.kind === 'videoinput');
+      const avoid = /ultra[\s-]?wide|0\.5|tele(photo)?/i;
+      const backLike = videoInputs.filter(d => /back|rear|environment/i.test(d.label));
+
+      let ranked;
+      if(backLike.length){
+        // main/wide lenses first, ultra-wide and telephoto pushed to the end
+        ranked = [
+          ...backLike.filter(d => !avoid.test(d.label)),
+          ...backLike.filter(d => avoid.test(d.label)),
+        ];
+      } else if(videoInputs.length){
+        // labels weren't descriptive (some Android browsers) — fall back to
+        // all cameras, last-listed first, since the main back camera is
+        // often enumerated last on phones without labelled devices
+        ranked = [...videoInputs].reverse();
+      } else {
+        ranked = [];
+      }
+      backCameras = ranked;
+    } catch(err){
+      console.warn('Camera enumeration failed, will fall back to facingMode', err);
+      backCameras = [];
+    }
+    return backCameras;
+  }
+
   function stopScanner(){
     if(codeReader && scanning){
       codeReader.reset();
@@ -280,19 +326,16 @@
     scanModal.classList.remove('open');
   }
 
-  function openScanner(title, statusText){
-    scanModalTitle.textContent = title;
-    if(typeof ZXing === 'undefined'){
-      scanStatus.textContent = 'Scanner failed to load. Check your internet connection.';
-      scanModal.classList.add('open');
-      return;
-    }
-    scanModal.classList.add('open');
-    scanStatus.textContent = statusText;
+  async function startScan(){
     const reader = getCodeReader();
     scanning = true;
+    const cam = backCameras[cameraIndex];
+    const constraints = cam
+      ? { video: { deviceId: { exact: cam.deviceId } } }
+      : { video: { facingMode: { ideal: 'environment' } } };
+
     reader.decodeFromConstraints(
-      { video: { facingMode: { ideal: 'environment' } } },
+      constraints,
       'scanVideo',
       (result, err) => {
         if(result){
@@ -313,6 +356,32 @@
       scanStatus.textContent = 'Could not start camera: ' + (err && err.name ? err.name : err);
     });
   }
+
+  async function openScanner(title, statusText){
+    scanModalTitle.textContent = title;
+    currentScan = { title, statusText };
+    if(typeof ZXing === 'undefined'){
+      scanStatus.textContent = 'Scanner failed to load. Check your internet connection.';
+      scanModal.classList.add('open');
+      return;
+    }
+    scanModal.classList.add('open');
+    scanStatus.textContent = 'Starting camera…';
+
+    await findBackCameras();
+    cameraIndex = 0;
+    switchCameraBtn.hidden = backCameras.length < 2;
+    scanStatus.textContent = statusText;
+    startScan();
+  }
+
+  switchCameraBtn.addEventListener('click', () => {
+    if(backCameras.length < 2) return;
+    cameraIndex = (cameraIndex + 1) % backCameras.length;
+    if(codeReader && scanning) codeReader.reset();
+    scanStatus.textContent = 'Switching camera…';
+    startScan();
+  });
 
   scanBtn.addEventListener('click', () => {
     linkTarget = null;
