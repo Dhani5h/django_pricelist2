@@ -67,6 +67,7 @@
         <button class="btn ghost" type="button" id="closeScan">Cancel</button>
       </span>
     </div>
+    <div id="scanDebug" class="mono" style="font-size:11px;color:var(--muted);margin-top:6px;word-break:break-word;"></div>
     <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line);">
       <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">Camera not picking it up? Type the number printed under the barcode:</div>
       <div style="display:flex;gap:8px;">
@@ -354,16 +355,38 @@
       ? { video: { deviceId: { exact: cam.deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } } }
       : { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } };
 
+    const scanDebug = document.getElementById('scanDebug');
+    let framesSeen = 0;
+    scanDebug.textContent = '';
+
     reader.decodeFromConstraints(
       constraints,
       'scanVideo',
       (result, err) => {
         if(result){
           handleScanResult(result.getText());
+          return;
         }
-        // err fires continuously on frames with no barcode found — ignore those
+        framesSeen++;
+        // NotFoundException fires on every frame with no barcode visible — that's
+        // normal and expected. Anything else is worth surfacing on screen.
+        if(err && err.name && err.name !== 'NotFoundException' && err.name !== 'NotFoundException2'){
+          scanDebug.textContent = 'Decoder note: ' + err.name + (err.message ? ' — ' + err.message : '');
+        }
       }
-    ).catch((err) => {
+    ).then(() => {
+      // report what camera actually got used, once the video is playing
+      const video = document.getElementById('scanVideo');
+      const report = () => {
+        const track = video.srcObject && video.srcObject.getVideoTracks && video.srcObject.getVideoTracks()[0];
+        if(track){
+          const settings = track.getSettings ? track.getSettings() : {};
+          scanDebug.textContent = `Camera: ${track.label || 'unknown'} · ${settings.width || video.videoWidth}x${settings.height || video.videoHeight}`;
+        }
+      };
+      if(video.readyState >= 1) report();
+      else video.addEventListener('loadedmetadata', report, { once: true });
+    }).catch((err) => {
       console.error('Camera start failed:', err);
       scanStatus.textContent = 'Could not start camera: ' + (err && err.name ? err.name : err);
     });
