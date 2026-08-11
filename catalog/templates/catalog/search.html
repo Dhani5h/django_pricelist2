@@ -265,11 +265,33 @@
   const detailsModal = document.getElementById('detailsModal');
   let codeReader = null;
   let scanning = false;
+  let usingNative = false;   // which engine is currently driving the scan
+  let nativeDetector = null;
+  let nativeStream = null;
+  let nativeRAF = null;
   let linkTarget = null; // set to an item code when scanning to attach a barcode to it, rather than looking one up
   let saveItemField = function(){}; // replaced below when the staff details modal is present
   let backCameras = [];   // candidate back-facing cameras, best guess first
   let cameraIndex = 0;    // which candidate we're currently using
   let currentScan = null; // { title, statusText } — so "Switch camera" can restart with the same intent
+
+  const BARCODE_FORMATS_NATIVE = ['ean_13','ean_8','upc_a','upc_e','code_128','code_39','code_93','itf','codabar','qr_code'];
+
+  // The browser's native barcode engine (same vision stack as Google Lens on
+  // Android Chrome) is far more accurate than a pure-JS decoder, but Safari/
+  // iOS doesn't support it — so we use it when available and fall back to
+  // ZXing (a JS library) everywhere else, automatically.
+  function getNativeDetector(){
+    if(!('BarcodeDetector' in window)) return null;
+    if(nativeDetector) return nativeDetector;
+    try {
+      nativeDetector = new BarcodeDetector({ formats: BARCODE_FORMATS_NATIVE });
+    } catch(err){
+      console.warn('BarcodeDetector unavailable, falling back to ZXing', err);
+      nativeDetector = null;
+    }
+    return nativeDetector;
+  }
 
   function getCodeReader(){
     if(codeReader) return codeReader;
@@ -331,7 +353,17 @@
   }
 
   function stopScanner(){
-    if(codeReader && scanning){
+    if(usingNative){
+      scanning = false;
+      if(nativeRAF) cancelAnimationFrame(nativeRAF);
+      nativeRAF = null;
+      if(nativeStream){
+        nativeStream.getTracks().forEach(t => t.stop());
+        nativeStream = null;
+      }
+      const video = document.getElementById('scanVideo');
+      video.srcObject = null;
+    } else if(codeReader && scanning){
       codeReader.reset();
     }
     scanning = false;
@@ -351,15 +383,57 @@
     }
   }
 
-  async function startScan(){
+  function reportCameraInfo(video, engineLabel){
+    const scanCameraInfo = document.getElementById('scanCameraInfo');
+    const track = video.srcObject && video.srcObject.getVideoTracks && video.srcObject.getVideoTracks()[0];
+    if(track){
+      const settings = track.getSettings ? track.getSettings() : {};
+      scanCameraInfo.textContent = `${engineLabel} · ${track.label || 'unknown'} · ${settings.width || video.videoWidth}x${settings.height || video.videoHeight}`;
+    }
+  }
+
+  async function startNativeScan(detector){
+    const video = document.getElementById('scanVideo');
+    const cam = backCameras[cameraIndex];
+    const videoConstraints = cam
+      ? { deviceId: { exact: cam.deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
+      : { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } };
+
+    try {
+      nativeStream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints });
+    } catch(err){
+      console.error('Camera start failed:', err);
+      scanStatus.textContent = 'Could not start camera: ' + (err && err.name ? err.name : err);
+      return;
+    }
+    video.srcObject = nativeStream;
+    try { await video.play(); } catch(e){ /* autoplay quirks — ignore */ }
+    reportCameraInfo(video, 'Native scanner');
+
+    const scanDebug = document.getElementById('scanDebug');
+    const loop = async () => {
+      if(!scanning) return;
+      try {
+        const results = await detector.detect(video);
+        if(results && results.length){
+          handleScanResult(results[0].rawValue);
+          return;
+        }
+      } catch(err){
+        scanDebug.textContent = 'Decoder note: ' + (err && err.message ? err.message : err);
+      }
+      nativeRAF = requestAnimationFrame(loop);
+    };
+    loop();
+  }
+
+  async function startZxingScan(){
     const reader = getCodeReader();
-    scanning = true;
     const cam = backCameras[cameraIndex];
     const constraints = cam
       ? { video: { deviceId: { exact: cam.deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } } }
       : { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } };
 
-    const scanCameraInfo = document.getElementById('scanCameraInfo');
     const scanDebug = document.getElementById('scanDebug');
     scanDebug.textContent = '';
 
@@ -382,15 +456,8 @@
         }
       }
     ).then(() => {
-      // report what camera actually got used, once the video is playing
       const video = document.getElementById('scanVideo');
-      const report = () => {
-        const track = video.srcObject && video.srcObject.getVideoTracks && video.srcObject.getVideoTracks()[0];
-        if(track){
-          const settings = track.getSettings ? track.getSettings() : {};
-          scanCameraInfo.textContent = `Camera: ${track.label || 'unknown'} · ${settings.width || video.videoWidth}x${settings.height || video.videoHeight}`;
-        }
-      };
+      const report = () => reportCameraInfo(video, 'ZXing scanner');
       if(video.readyState >= 1) report();
       else video.addEventListener('loadedmetadata', report, { once: true });
     }).catch((err) => {
@@ -399,11 +466,22 @@
     });
   }
 
+  async function startScan(){
+    scanning = true;
+    const detector = getNativeDetector();
+    usingNative = !!detector;
+    if(usingNative){
+      startNativeScan(detector);
+    } else {
+      startZxingScan();
+    }
+  }
+
   async function openScanner(title, statusText){
     scanModalTitle.textContent = title;
     currentScan = { title, statusText };
     document.getElementById('manualBarcodeInput').value = '';
-    if(typeof ZXing === 'undefined'){
+    if(typeof ZXing === 'undefined' && !('BarcodeDetector' in window)){
       scanStatus.textContent = 'Scanner failed to load. Check your internet connection.';
       scanModal.classList.add('open');
       return;
@@ -421,7 +499,13 @@
   switchCameraBtn.addEventListener('click', () => {
     if(backCameras.length < 2) return;
     cameraIndex = (cameraIndex + 1) % backCameras.length;
-    if(codeReader && scanning) codeReader.reset();
+    if(usingNative){
+      if(nativeRAF) cancelAnimationFrame(nativeRAF);
+      nativeRAF = null;
+      if(nativeStream) nativeStream.getTracks().forEach(t => t.stop());
+    } else if(codeReader && scanning){
+      codeReader.reset();
+    }
     scanStatus.textContent = 'Switching camera…';
     startScan();
   });
