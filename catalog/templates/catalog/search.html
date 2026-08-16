@@ -326,7 +326,11 @@
 
       const devices = await navigator.mediaDevices.enumerateDevices();
       const videoInputs = devices.filter(d => d.kind === 'videoinput');
-      const avoid = /ultra[\s-]?wide|0\.5|tele(photo)?/i;
+      // Deprioritize ultra-wide/telephoto lenses, and also Apple's virtual
+      // "Dual"/"Triple" cameras — those auto-switch lenses based on zoom and
+      // can behave unpredictably for the close-up macro shot a barcode needs.
+      // A plain single "Back Camera" (just the main lens) is more predictable.
+      const avoid = /ultra[\s-]?wide|0\.5|tele(photo)?|dual|triple/i;
       const backLike = videoInputs.filter(d => /back|rear|environment/i.test(d.label));
 
       let ranked;
