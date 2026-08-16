@@ -57,7 +57,7 @@
   <div class="modal-box">
     <h3 id="scanModalTitle">Scan a barcode</h3>
     <div id="reader">
-      <video id="scanVideo" style="width:100%;border-radius:8px;background:#000;" playsinline muted></video>
+      <video id="scanVideo" style="width:100%;border-radius:8px;background:#000;display:none;" playsinline muted></video>
       <div class="scan-guide"></div>
     </div>
     <div class="modal-actions">
@@ -159,7 +159,7 @@
   {% endif %}
 {% endif %}
 
-<script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2@1/dist/quagga.min.js"></script>
 <script>
 (function(){
   const input = document.getElementById('q');
@@ -263,12 +263,12 @@
   const switchCameraBtn = document.getElementById('switchCamera');
   const scanStatus = document.getElementById('scanStatus');
   const detailsModal = document.getElementById('detailsModal');
-  let codeReader = null;
   let scanning = false;
   let usingNative = false;   // which engine is currently driving the scan
   let nativeDetector = null;
   let nativeStream = null;
   let nativeRAF = null;
+  let quaggaRunning = false;
   let linkTarget = null; // set to an item code when scanning to attach a barcode to it, rather than looking one up
   let saveItemField = function(){}; // replaced below when the staff details modal is present
   let backCameras = [];   // candidate back-facing cameras, best guess first
@@ -276,41 +276,24 @@
   let currentScan = null; // { title, statusText } — so "Switch camera" can restart with the same intent
 
   const BARCODE_FORMATS_NATIVE = ['ean_13','ean_8','upc_a','upc_e','code_128','code_39','code_93','itf','codabar','qr_code'];
+  const QUAGGA_READERS = ['ean_reader','ean_8_reader','upc_reader','upc_e_reader','code_128_reader','code_39_reader','codabar_reader'];
 
   // The browser's native barcode engine (same vision stack as Google Lens on
   // Android Chrome) is far more accurate than a pure-JS decoder, but Safari/
   // iOS doesn't support it — so we use it when available and fall back to
-  // ZXing (a JS library) everywhere else, automatically.
+  // Quagga2 (a JS library tuned specifically for 1D product barcodes)
+  // everywhere else, automatically. Quagga2 doesn't read QR codes, but this
+  // app's items only ever carry standard product barcodes.
   function getNativeDetector(){
     if(!('BarcodeDetector' in window)) return null;
     if(nativeDetector) return nativeDetector;
     try {
       nativeDetector = new BarcodeDetector({ formats: BARCODE_FORMATS_NATIVE });
     } catch(err){
-      console.warn('BarcodeDetector unavailable, falling back to ZXing', err);
+      console.warn('BarcodeDetector unavailable, falling back to Quagga2', err);
       nativeDetector = null;
     }
     return nativeDetector;
-  }
-
-  function getCodeReader(){
-    if(codeReader) return codeReader;
-    const hints = new Map();
-    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
-      ZXing.BarcodeFormat.EAN_13,
-      ZXing.BarcodeFormat.EAN_8,
-      ZXing.BarcodeFormat.UPC_A,
-      ZXing.BarcodeFormat.UPC_E,
-      ZXing.BarcodeFormat.CODE_128,
-      ZXing.BarcodeFormat.CODE_39,
-      ZXing.BarcodeFormat.CODE_93,
-      ZXing.BarcodeFormat.ITF,
-      ZXing.BarcodeFormat.CODABAR,
-      ZXing.BarcodeFormat.QR_CODE,
-    ]);
-    hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-    codeReader = new ZXing.BrowserMultiFormatReader(hints);
-    return codeReader;
   }
 
   // Phones with multiple rear lenses (ultra-wide/wide/telephoto) don't reliably
@@ -356,6 +339,18 @@
     return backCameras;
   }
 
+  function stopQuagga(){
+    if(quaggaRunning){
+      try { Quagga.offDetected(); } catch(e){}
+      try { Quagga.stop(); } catch(e){}
+      quaggaRunning = false;
+    }
+    // Quagga injects its own <video>/<canvas> into #reader — clean those up
+    // so the container is fresh the next time the scanner opens.
+    const target = document.getElementById('reader');
+    target.querySelectorAll('video:not(#scanVideo), canvas').forEach(el => el.remove());
+  }
+
   function stopScanner(){
     if(usingNative){
       scanning = false;
@@ -367,8 +362,9 @@
       }
       const video = document.getElementById('scanVideo');
       video.srcObject = null;
-    } else if(codeReader && scanning){
-      codeReader.reset();
+      video.style.display = 'none';
+    } else {
+      stopQuagga();
     }
     scanning = false;
     scanModal.classList.remove('open');
@@ -420,6 +416,7 @@
 
   async function startNativeScan(detector){
     const video = document.getElementById('scanVideo');
+    video.style.display = 'block';
     const cam = backCameras[cameraIndex];
     const videoConstraints = cam
       ? { deviceId: { exact: cam.deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
@@ -462,12 +459,13 @@
     loop();
   }
 
-  async function startZxingScan(){
-    const reader = getCodeReader();
+  async function startQuaggaScan(){
+    const target = document.getElementById('reader');
+    stopQuagga(); // clean up any leftover elements from a previous run
     const cam = backCameras[cameraIndex];
     const constraints = cam
-      ? { video: { deviceId: { exact: cam.deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } } }
-      : { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } };
+      ? { deviceId: { exact: cam.deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
+      : { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } };
 
     const scanCameraInfo = document.getElementById('scanCameraInfo');
     const scanDebug = document.getElementById('scanDebug');
@@ -475,44 +473,47 @@
     let frameCount = 0;
     let baseCameraInfo = '';
 
-    // The "no barcode found in this frame" signal fires continuously during
-    // normal operation — the class name gets mangled by minification so we
-    // match on the message text instead. Anything else is a real problem.
-    const routineNotFound = /no multiformat readers were able to detect the code/i;
-
-    reader.decodeFromConstraints(
-      constraints,
-      'scanVideo',
-      (result, err) => {
-        if(result){
-          handleScanResult(result.getText());
-          return;
-        }
-        const msg = err && err.message ? err.message : '';
-        if(err && !routineNotFound.test(msg)){
-          scanDebug.textContent = 'Decoder note: ' + (err.name || '?') + (msg ? ' — ' + msg : '');
-        } else {
-          // still show something — confirms the decoder loop is actually
-          // running frame-by-frame, not silently stuck doing nothing
-          frameCount++;
-          if(frameCount % 10 === 0 && baseCameraInfo){
-            scanCameraInfo.textContent = `${baseCameraInfo} · ${frameCount} frames checked, no match yet`;
-          }
-        }
+    Quagga.init({
+      inputStream: {
+        type: 'LiveStream',
+        target: target,
+        constraints: constraints,
+      },
+      locator: { patchSize: 'medium', halfSample: true },
+      numOfWorkers: 2,
+      decoder: { readers: QUAGGA_READERS },
+      locate: true,
+    }, (err) => {
+      if(err){
+        console.error('Camera start failed:', err);
+        scanStatus.textContent = 'Could not start camera: ' + err;
+        return;
       }
-    ).then(() => {
-      const video = document.getElementById('scanVideo');
-      const report = async () => {
-        reportCameraInfo(video, 'ZXing scanner');
-        const focusStatus = await nudgeContinuousFocus(video);
-        scanCameraInfo.textContent += ' · ' + focusStatus;
+      Quagga.start();
+      quaggaRunning = true;
+
+      const video = target.querySelector('video');
+      if(video){
+        reportCameraInfo(video, 'Quagga scanner');
+        nudgeContinuousFocus(video).then((focusStatus) => {
+          scanCameraInfo.textContent += ' · ' + focusStatus;
+          baseCameraInfo = scanCameraInfo.textContent;
+        });
         baseCameraInfo = scanCameraInfo.textContent;
-      };
-      if(video.readyState >= 1) report();
-      else video.addEventListener('loadedmetadata', report, { once: true });
-    }).catch((err) => {
-      console.error('Camera start failed:', err);
-      scanStatus.textContent = 'Could not start camera: ' + (err && err.name ? err.name : err);
+      }
+    });
+
+    Quagga.onProcessed(() => {
+      frameCount++;
+      if(frameCount % 10 === 0 && baseCameraInfo){
+        scanCameraInfo.textContent = `${baseCameraInfo} · ${frameCount} frames checked, no match yet`;
+      }
+    });
+
+    Quagga.onDetected((result) => {
+      if(result && result.codeResult && result.codeResult.code){
+        handleScanResult(result.codeResult.code);
+      }
     });
   }
 
@@ -523,7 +524,7 @@
     if(usingNative){
       startNativeScan(detector);
     } else {
-      startZxingScan();
+      startQuaggaScan();
     }
   }
 
@@ -531,7 +532,7 @@
     scanModalTitle.textContent = title;
     currentScan = { title, statusText };
     document.getElementById('manualBarcodeInput').value = '';
-    if(typeof ZXing === 'undefined' && !('BarcodeDetector' in window)){
+    if(typeof Quagga === 'undefined' && !('BarcodeDetector' in window)){
       scanStatus.textContent = 'Scanner failed to load. Check your internet connection.';
       scanModal.classList.add('open');
       return;
@@ -553,8 +554,8 @@
       if(nativeRAF) cancelAnimationFrame(nativeRAF);
       nativeRAF = null;
       if(nativeStream) nativeStream.getTracks().forEach(t => t.stop());
-    } else if(codeReader && scanning){
-      codeReader.reset();
+    } else {
+      stopQuagga();
     }
     scanStatus.textContent = 'Switching camera…';
     startScan();
