@@ -396,6 +396,28 @@
     }
   }
 
+  // iOS Safari's web camera API often defaults to a focus mode that can't
+  // get sharp enough at the close range a barcode needs, even though the
+  // phone's native Camera app handles it fine. Best-effort — silently does
+  // nothing on browsers/devices that don't support explicit focus control.
+  async function nudgeContinuousFocus(video){
+    const track = video.srcObject && video.srcObject.getVideoTracks && video.srcObject.getVideoTracks()[0];
+    if(!track || !track.applyConstraints || !track.getCapabilities){
+      return 'focus control: unsupported';
+    }
+    const caps = track.getCapabilities();
+    if(!caps.focusMode || !caps.focusMode.includes('continuous')){
+      return 'focus control: unsupported';
+    }
+    try {
+      await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+      return 'focus: continuous';
+    } catch(err){
+      console.warn('Could not set continuous focus', err);
+      return 'focus: continuous (failed)';
+    }
+  }
+
   async function startNativeScan(detector){
     const video = document.getElementById('scanVideo');
     const cam = backCameras[cameraIndex];
@@ -414,6 +436,8 @@
     try { await video.play(); } catch(e){ /* autoplay quirks — ignore */ }
     reportCameraInfo(video, 'Native scanner');
     const scanCameraInfo = document.getElementById('scanCameraInfo');
+    const focusStatus = await nudgeContinuousFocus(video);
+    scanCameraInfo.textContent += ' · ' + focusStatus;
     const baseCameraInfo = scanCameraInfo.textContent;
 
     const scanDebug = document.getElementById('scanDebug');
@@ -478,8 +502,10 @@
       }
     ).then(() => {
       const video = document.getElementById('scanVideo');
-      const report = () => {
+      const report = async () => {
         reportCameraInfo(video, 'ZXing scanner');
+        const focusStatus = await nudgeContinuousFocus(video);
+        scanCameraInfo.textContent += ' · ' + focusStatus;
         baseCameraInfo = scanCameraInfo.textContent;
       };
       if(video.readyState >= 1) report();
