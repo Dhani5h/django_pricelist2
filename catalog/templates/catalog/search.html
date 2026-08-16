@@ -413,8 +413,11 @@
     video.srcObject = nativeStream;
     try { await video.play(); } catch(e){ /* autoplay quirks — ignore */ }
     reportCameraInfo(video, 'Native scanner');
+    const scanCameraInfo = document.getElementById('scanCameraInfo');
+    const baseCameraInfo = scanCameraInfo.textContent;
 
     const scanDebug = document.getElementById('scanDebug');
+    let frameCount = 0;
     const loop = async () => {
       if(!scanning) return;
       try {
@@ -422,6 +425,10 @@
         if(results && results.length){
           handleScanResult(results[0].rawValue);
           return;
+        }
+        frameCount++;
+        if(frameCount % 10 === 0 && baseCameraInfo){
+          scanCameraInfo.textContent = `${baseCameraInfo} · ${frameCount} frames checked, no match yet`;
         }
       } catch(err){
         scanDebug.textContent = 'Decoder note: ' + (err && err.message ? err.message : err);
@@ -438,8 +445,11 @@
       ? { video: { deviceId: { exact: cam.deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } } }
       : { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } };
 
+    const scanCameraInfo = document.getElementById('scanCameraInfo');
     const scanDebug = document.getElementById('scanDebug');
     scanDebug.textContent = '';
+    let frameCount = 0;
+    let baseCameraInfo = '';
 
     // The "no barcode found in this frame" signal fires continuously during
     // normal operation — the class name gets mangled by minification so we
@@ -457,11 +467,21 @@
         const msg = err && err.message ? err.message : '';
         if(err && !routineNotFound.test(msg)){
           scanDebug.textContent = 'Decoder note: ' + (err.name || '?') + (msg ? ' — ' + msg : '');
+        } else {
+          // still show something — confirms the decoder loop is actually
+          // running frame-by-frame, not silently stuck doing nothing
+          frameCount++;
+          if(frameCount % 10 === 0 && baseCameraInfo){
+            scanCameraInfo.textContent = `${baseCameraInfo} · ${frameCount} frames checked, no match yet`;
+          }
         }
       }
     ).then(() => {
       const video = document.getElementById('scanVideo');
-      const report = () => reportCameraInfo(video, 'ZXing scanner');
+      const report = () => {
+        reportCameraInfo(video, 'ZXing scanner');
+        baseCameraInfo = scanCameraInfo.textContent;
+      };
       if(video.readyState >= 1) report();
       else video.addEventListener('loadedmetadata', report, { once: true });
     }).catch((err) => {
