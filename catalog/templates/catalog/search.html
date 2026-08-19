@@ -28,7 +28,7 @@
 
   <form class="toolbar {% if not has_search %}toolbar-centered{% endif %}" method="get" id="searchForm" autocomplete="off">
     <div style="position:relative;flex:1;min-width:160px;">
-      <input id="q" type="text" name="q" placeholder="Search by code or name" value="{{ query }}" autocomplete="off">
+      <input id="q" type="text" name="q" placeholder="Search by code or name" value="{{ query }}" autocomplete="off" inputmode="numeric">
       <div id="suggestions"></div>
     </div>
     {% if has_search %}
