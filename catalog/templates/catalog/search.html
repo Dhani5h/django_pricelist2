@@ -28,7 +28,9 @@
 
   <form class="toolbar {% if not has_search %}toolbar-centered{% endif %}" method="get" id="searchForm" autocomplete="off">
     <div style="position:relative;flex:1;min-width:160px;">
-      <input id="q" type="text" name="q" placeholder="Search by code or name" value="{{ query }}" autocomplete="off" inputmode="numeric">
+      <input id="q" type="text" name="q" placeholder="Search by code or name" value="{{ query }}" autocomplete="off" inputmode="numeric" style="padding-right:38px;">
+      <button type="button" id="slashKey" aria-label="Insert slash"
+        style="position:absolute;right:4px;top:4px;bottom:4px;width:30px;border:1px solid var(--line-strong);border-radius:3px;background:var(--card);color:var(--ink);font-family:'IBM Plex Mono',monospace;font-size:14px;cursor:pointer;">/</button>
       <div id="suggestions"></div>
     </div>
     {% if has_search %}
@@ -165,9 +167,21 @@
   const input = document.getElementById('q');
   const box = document.getElementById('suggestions');
   const form = document.getElementById('searchForm');
+  const slashKey = document.getElementById('slashKey');
   let debounceTimer = null;
   let activeIndex = -1;
   let currentResults = [];
+
+  // The numeric keypad has no "/" key, but some item codes use one — insert
+  // it at the cursor position, same as if it had been typed.
+  slashKey.addEventListener('click', () => {
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? input.value.length;
+    input.value = input.value.slice(0, start) + '/' + input.value.slice(end);
+    input.focus();
+    input.setSelectionRange(start + 1, start + 1);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
 
   function closeBox(){
     box.classList.remove('open');
