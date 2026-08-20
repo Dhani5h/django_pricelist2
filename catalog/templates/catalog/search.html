@@ -28,9 +28,7 @@
 
   <form class="toolbar {% if not has_search %}toolbar-centered{% endif %}" method="get" id="searchForm" autocomplete="off">
     <div style="position:relative;flex:1;min-width:160px;">
-      <input id="q" type="text" name="q" placeholder="Search by code or name" value="{{ query }}" autocomplete="off" inputmode="numeric" style="padding-right:38px;">
-      <button type="button" id="slashKey" aria-label="Insert slash"
-        style="position:absolute;right:4px;top:4px;bottom:4px;width:30px;border:1px solid var(--line-strong);border-radius:3px;background:var(--card);color:var(--ink);font-family:'IBM Plex Mono',monospace;font-size:14px;cursor:pointer;">/</button>
+      <input id="q" type="text" name="q" placeholder="Search by code or name" value="{{ query }}" autocomplete="off" inputmode="numeric">
       <div id="suggestions"></div>
     </div>
     {% if has_search %}
@@ -42,6 +40,7 @@
     </select>
     {% endif %}
     <button class="btn" type="submit">Search</button>
+    <button class="btn" type="button" id="slashKey" aria-label="Insert slash" style="padding-left:14px;padding-right:14px;font-family:'IBM Plex Mono',monospace;">/</button>
     <button class="btn ghost" type="button" id="scanBtn">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>Scan
     </button>
